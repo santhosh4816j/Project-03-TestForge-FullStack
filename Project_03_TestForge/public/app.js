@@ -1,0 +1,22 @@
+
+const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let cases=[],runs=[];
+const api=async(path,options={})=>{const r=await fetch('/api'+path,{...options,headers:{'content-type':'application/json',...options.headers}});const data=await r.json();if(!r.ok)throw Error(data.error||'Request failed');return data};
+function toast(s){$('#toast').textContent=s;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',3500)}
+function caseRow(c,remove=false){return `<div class="item"><div><strong>${esc(c.name)}</strong><small>${esc(c.method||'CHROMIUM')} · ${esc(c.url)}</small></div><div class="actions"><span class="tag ${c.type==='browser'?'browser':''}">${c.type.toUpperCase()}</span>${remove?`<button data-delete="${esc(c.id)}">Delete</button>`:''}</div></div>`}
+function render(){
+ $('#totalCases').textContent=cases.length;$('#totalRuns').textContent=runs.length;
+ const latest=runs[0];$('#passRate').textContent=latest?Math.round(latest.passed/latest.results.length*100)+'%':'—';$('#duration').textContent=latest?latest.durationMs+'ms':'—';
+ $('#dashboardCases').innerHTML=cases.map(c=>caseRow(c)).join('')||'<div class="empty">No tests yet</div>';
+ $('#caseLibrary').innerHTML=cases.map(c=>caseRow(c,true)).join('')||'<div class="empty">Create your first test case</div>';
+ $('#latest').innerHTML=latest?`<div class="summaryline">${latest.passed} passed · ${latest.failed} failed</div>${latest.results.map(r=>`<div class="result"><div class="resulthead"><strong>${esc(r.name)}</strong><span class="tag ${r.ok?'pass':'fail'}">${r.ok?'PASS':'FAIL'}</span></div><p>${esc(r.message)} · ${r.durationMs}ms</p></div>`).join('')}`:'<div class="empty">Run a suite to see detailed results.</div>';
+ $('#historyRows').innerHTML=runs.map(r=>`<div class="item"><div><strong>${esc(new Date(r.startedAt).toLocaleString())}</strong><small>${r.passed} passed · ${r.failed} failed · ${r.durationMs}ms</small></div><div class="actions"><a href="/api/runs/${r.id}/report" target="_blank" rel="noopener">HTML report</a><button data-export="${r.id}">Export JSON</button></div></div>`).join('')||'<div class="empty">No test runs yet</div>';
+}
+async function refresh(){[cases,runs]=await Promise.all([api('/cases'),api('/runs')]);render()}
+document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.nav button').forEach(x=>x.classList.toggle('active',x===b));['dashboard','cases','history'].forEach(x=>$('#'+x).hidden=x!==b.dataset.tab);$('#heading').textContent={dashboard:'Quality command center',cases:'Test case library',history:'Execution history'}[b.dataset.tab]});
+const open=()=>$('#createDialog').showModal();$('#openCreate').onclick=open;$('#openCreate2').onclick=open;$('#closeDialog').onclick=()=>$('#createDialog').close();
+$('#createForm').elements.type.onchange=e=>{$('#apiFields').hidden=e.target.value!=='api';$('#browserFields').hidden=e.target.value!=='browser';$('#methodLabel').hidden=e.target.value!=='api'};
+$('#createForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target),c=Object.fromEntries(f.entries());try{if(c.type==='browser'){delete c.method;delete c.expectedStatus;delete c.headers;delete c.body}else{delete c.expectedTitle;delete c.selector;c.expectedStatus=Number(c.expectedStatus);if(!c.headers)delete c.headers;if(!c.body)delete c.body}await api('/cases',{method:'POST',body:JSON.stringify(c)});$('#createDialog').close();e.target.reset();await refresh();toast('Test case saved')}catch(err){toast(err.message)}};
+$('#runAll').onclick=async()=>{const b=$('#runAll');b.disabled=true;b.textContent='◷ Running suite…';try{const r=await api('/run',{method:'POST',body:'{}'});await refresh();toast(`Run complete: ${r.passed} passed, ${r.failed} failed`)}catch(err){toast(err.message)}finally{b.disabled=false;b.textContent='▶ Run all tests'}};
+document.addEventListener('click',async e=>{const id=e.target.dataset.delete;if(id){if(!confirm('Delete this test case?'))return;try{await api('/cases/'+id,{method:'DELETE'});await refresh();toast('Case deleted')}catch(err){toast(err.message)}}const runId=e.target.dataset.export;if(runId){const r=runs.find(x=>x.id===runId);const blob=new Blob([JSON.stringify(r,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`testforge-${runId}.json`;a.click();URL.revokeObjectURL(url)}});
+refresh().catch(e=>toast(e.message));
